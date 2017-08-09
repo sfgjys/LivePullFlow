@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">LivePullFlow</string>
+    <string name="list_to_video">列表转视频</string>
+    <string name="video_and_list">视频和列表</string>
+    <string name="multi_video">多视频播放</string>
+</resources>
