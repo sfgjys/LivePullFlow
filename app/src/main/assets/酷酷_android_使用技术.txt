@@ -1,0 +1,77 @@
+UCMobile.PayPlugin
+
+alibaba.livecloud 阿里云直播播放
+
+alipay 支付宝
+
+alivc.videochat 阿里云连麦
+
+amap.api 高德地图
+
+android.internal.http.multipart
+
+volley Volley网络加载
+
+autonavi.amap.mapcore 高德地图
+
+bumptech.glide Glide图片加载
+
+example.udowsmap
+
+facebook
+
+framewidget
+
+github.hiteshsondhi88.libffmpeg
+
+google.gson JSON解析工具
+
+google.zxing 二维码
+
+google.protobuf XML解析
+
+hyphenate 环信 即使通信
+
+igexin 个推 第三方推送
+
+laiwang
+
+linkedin
+
+mdx.framework
+
+nineoldandroids 开源动画库
+
+nostra13.universalimageloader  ImageLoader图片加载
+
+renn.rennsdk
+
+sh.shvideolibrary 小视频录制
+
+sina.weibo.sdk  新浪微博
+
+squareup.wire Wire协议缓冲器
+
+superrtc.call
+
+tencent 腾讯三方登录
+
+udows
+
+umeng.socialize 友盟分享
+
+xiaomi.mipush.sdk 小米推送
+
+fm.jiecao.jcvideoplayer_lib JieCaoVideoPlayer视频播放控件
+
+apache.commons Apache工具包
+
+cn.jiguang/jpush 极光开发
+
+bolts 一个底层库集合
+
+android.support.annotations 注解库
+
+android.support.multidex 解决Dex超出
+
+android.support.graphics.drawable 图像处理
