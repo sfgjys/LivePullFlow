@@ -1,13 +1,18 @@
 package com.myself.livepullflow.ui;
 
+import android.annotation.SuppressLint;
+import android.app.ActivityManager;
 import android.app.AlertDialog;
+import android.content.Context;
 import android.content.DialogInterface;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Handler;
 import android.os.PowerManager;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.KeyEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.widget.FrameLayout;
@@ -18,9 +23,23 @@ import com.alivc.player.MediaPlayer;
 import com.alivc.player.NDKCallback;
 import com.myself.livepullflow.R;
 
+import java.util.List;
+
 public class ImportUrlPlayerActivity extends AppCompatActivity {
 
+    public static final String TAG = "ImportUrlPlayerActivity";
+
     private String mURL;
+
+    // true:正在前台工作  false:后台工作   初始是在前台工作
+    private boolean isCurrentRunningForeground = true;
+
+    // 标记播放器是否已经暂停
+    private boolean isPausePlayer = false;
+
+    // 播放器是否是用户暂停的
+    private boolean isPausedByUser = false;
+    ;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,12 +74,17 @@ public class ImportUrlPlayerActivity extends AppCompatActivity {
     // -----------------------------------------------------------------------------------------------------------------------------
 
     // **********************************************************初始化控件************************************************************
-    //  显示解码类型
+    // 显示解码类型
     private TextView mTextViewDecoderType;
+    // 显示错误内容
+    private TextView mTextViewPlayerError;
+    // 显示信息通知
+    private TextView mTextViewInfoMessage;
 
     private void initView() {
         mTextViewDecoderType = (TextView) findViewById(R.id.tv_decoder_type);
-
+        mTextViewPlayerError = (TextView) findViewById(R.id.tv_player_error);
+        mTextViewInfoMessage = (TextView) findViewById(R.id.tv_info_message);
 
         initSurface();
     }
@@ -78,10 +102,6 @@ public class ImportUrlPlayerActivity extends AppCompatActivity {
 
         // 创建SurfaceView控件
         mSurfaceView = new SurfaceView(this);
-
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT);
 
         // 为避免重复添加,事先remove子view
         flAddSurfaceView.removeAllViews();
@@ -110,12 +130,18 @@ public class ImportUrlPlayerActivity extends AppCompatActivity {
 
             @Override
             public void surfaceChanged(SurfaceHolder surfaceHolder, int i, int i1, int i2) {
-
+                Log.d(TAG, "onSurfaceChanged is valid ? " + surfaceHolder.getSurface().isValid());
+                if (mPlayer != null)
+                    // 在播放暂停或卡顿时，这个时候旋转手机屏幕，会发生渲染错位。为了解决这一问题，请在surfaceChanged发生时，调用此方法。如果播放界面关闭了自动旋转功能，无须调用此方法。
+                    mPlayer.setSurfaceChanged();// TODO
             }
 
             @Override
             public void surfaceDestroyed(SurfaceHolder surfaceHolder) {
-
+                if (mPlayer != null) {
+                    // 通过releaseVideoSurface 释放当前的 surface，但是一旦释放之后，就不能再次调用，否则就会出现黑屏。
+                    mPlayer.releaseVideoSurface();// TODO
+                }
             }
         });
 
@@ -137,15 +163,15 @@ public class ImportUrlPlayerActivity extends AppCompatActivity {
             // 异常错误事件
             mPlayer.setErrorListener(new VideoErrorListener());
             // 信息状态监听事件
-            mPlayer.setInfoListener(new VideoInfolistener());
+            mPlayer.setInfoListener(new VideoInfoListener());
             // seek结束事件（备注：直播无seek操作）
-            mPlayer.setSeekCompleteListener(new VideoSeekCompletelistener());
+            mPlayer.setSeekCompleteListener(new VideoSeekCompleteListener());
             // 播放结束事件
-            mPlayer.setCompletedListener(new VideoCompletelistener());
+            mPlayer.setCompletedListener(new VideoCompleteListener());
             // 画面大小变化事件
-            mPlayer.setVideoSizeChangeListener(new VideoSizeChangelistener());
+            mPlayer.setVideoSizeChangeListener(new VideoSizeChangeListener());
             // 缓冲信息更新事件
-            mPlayer.setBufferingUpdateListener(new VideoBufferUpdatelistener());
+            mPlayer.setBufferingUpdateListener(new VideoBufferUpdateListener());
             // 停止事件
             mPlayer.setStopedListener(new VideoStoppedListener());
 
@@ -157,7 +183,7 @@ public class ImportUrlPlayerActivity extends AppCompatActivity {
             mPlayer.enableNativeLog();
         }
 
-        // 准备开始播放
+        // 准备并开始播放
         mPlayer.prepareAndPlay(mURL);
 
         //播放加密视频使用如下：？？？？？？？？？？？？？？？？？？？？？
@@ -184,175 +210,172 @@ public class ImportUrlPlayerActivity extends AppCompatActivity {
      * 准备完成监听器:调度更新进度， 当SurfaceView走完监听中的surfaceChanged方法后会来到这个监听
      */
     private class VideoPreparedListener implements MediaPlayer.MediaPlayerPreparedListener {
-
         @Override
         public void onPrepared() {
             Log.d(TAG, "onPrepared");
             if (mPlayer != null) {
-                // 设置播放器渲染时的缩放模式，目前有两种模式，VIDEO_ SCALING_ MODE_ SCALE_ TO_ FIT：等比例缩放显示，如果视频长宽比和屏幕长宽比不一致时，会存在黑边；VIDEO_ SCALING_ MODE_ SCALE_ TO_ FIT_ WITH_ CROPPING：带裁边的等比例缩放，如果视频长宽比和屏幕长宽比不一致时，会进行裁边处理以保持全屏显示。
+                // 设置播放器渲染时的缩放模式，目前有两种模式，VIDEO_SCALING_MODE_SCALE_TO_FIT：等比例缩放显示，如果视频长宽比和屏幕长宽比不一致时，会存在黑边；VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING：带裁边的等比例缩放，如果视频长宽比和屏幕长宽比不一致时，会进行裁边处理以保持全屏显示。
                 mPlayer.setVideoScalingMode(MediaPlayer.VideoScalingMode.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
-                // 根据视频时长设置UI
-                update_total_duration(mPlayer.getDuration());// getDuration 获取视频时长，单位为毫秒。
-                mTimerHandler.postDelayed(mRunnable, 1000);//  开启内循环进行更新进度条进度
-                // 展示进度条
-                show_progress_ui(true);
-                mTimerHandler.postDelayed(mUIRunnable, 3000);// mUIRunnable的run方法内容没有用处
             }
         }
     }
 
-
     /**
-     * 错误处理监听器
+     * 错误处理监听器 当视频播放出现错误后,会发出该事件通知消息，用户需要注册该事件通知，以便在出现错误后给出相关错误提示。
      */
     private class VideoErrorListener implements MediaPlayer.MediaPlayerErrorListener {
-
+        @SuppressLint("SetTextI18n")
+        @Override
         public void onError(int what, int extra) {
-            int errCode;
-
-            if (mPlayer == null) {
-                return;
-            }
-
-            errCode = mPlayer.getErrorCode();
-            switch (errCode) {
-                case MediaPlayer.ALIVC_ERR_LOADING_TIMEOUT:
-                    report_error("缓冲超时,请确认网络连接正常后重试", true);
-                    mPlayer.reset();
-                    break;
-                case MediaPlayer.ALIVC_ERR_NO_INPUTFILE:
-                    report_error("no input file", true);
-                    mPlayer.reset();
-                    break;
-                case MediaPlayer.ALIVC_ERR_NO_VIEW:
-                    report_error("no surface", true);
-                    mPlayer.reset();
-                    break;
-                case MediaPlayer.ALIVC_ERR_INVALID_INPUTFILE:
-                    report_error("视频资源或者网络不可用", true);
-                    mPlayer.reset();
-                    break;
-                case MediaPlayer.ALIVC_ERR_NO_SUPPORT_CODEC:
-                    report_error("no codec", true);
-                    mPlayer.reset();
-                    break;
-                case MediaPlayer.ALIVC_ERR_FUNCTION_DENIED:
-                    report_error("no priority", true);
-                    mPlayer.reset();
-                    break;
+            switch (what) {// 错误信息的类型.错误信息有：
                 case MediaPlayer.ALIVC_ERR_UNKNOWN:
-                    report_error("unknown error", true);
+                    mTextViewPlayerError.setText("未知错误");
                     mPlayer.reset();
                     break;
-                case MediaPlayer.ALIVC_ERR_NO_NETWORK:
-                    report_error("视频资源或者网络不可用", true);
+                case MediaPlayer.ALIVC_ERR_LOADING_TIMEOUT://
+                    mTextViewPlayerError.setText("缓冲超时");
                     mPlayer.reset();
                     break;
-                case MediaPlayer.ALIVC_ERR_ILLEGALSTATUS:
-                    report_error("illegal call", true);
-                    break;
-                case MediaPlayer.ALIVC_ERR_NOTAUTH:
-                    report_error("auth failed", true);
-                    break;
-                case MediaPlayer.ALIVC_ERR_READD:
-                    report_error("资源访问失败,请重试", true);
+                case MediaPlayer.ALIVC_ERR_NO_INPUTFILE://
+                    mTextViewPlayerError.setText("未设置视频源");
                     mPlayer.reset();
+                    break;
+                case MediaPlayer.ALIVC_ERR_NO_VIEW://
+                    mTextViewPlayerError.setText("无效的surface");
+                    mPlayer.reset();
+                    break;
+                case MediaPlayer.ALIVC_ERR_INVALID_INPUTFILE://
+                    mTextViewPlayerError.setText("无效的视频源");
+                    mPlayer.reset();
+                    break;
+                case MediaPlayer.ALIVC_ERR_NO_SUPPORT_CODEC://
+                    mTextViewPlayerError.setText("无支持的解码器");
+                    mPlayer.reset();
+                    break;
+                case MediaPlayer.ALIVC_ERR_FUNCTION_DENIED://
+                    mTextViewPlayerError.setText("操作无权限");
+                    mPlayer.reset();
+                    break;
+                case MediaPlayer.ALIVC_ERR_NO_NETWORK://
+                    mTextViewPlayerError.setText("网络不可用");
+                    mPlayer.reset();
+                    break;
+                case MediaPlayer.ALIVC_ERR_READD://
+                    mTextViewPlayerError.setText("视频源访问失败");
+                    mPlayer.reset();
+                    break;
+                case MediaPlayer.ALIVC_ERR_ILLEGALSTATUS://
+                    mTextViewPlayerError.setText("非法状态");
+                    break;
+                case MediaPlayer.ALIVC_ERR_NOTAUTH://
+                    mTextViewPlayerError.setText("未鉴权");
                     break;
                 default:
+                    mTextViewPlayerError.setText("NO");
                     break;
-
+            }
+            switch (extra) {// 错误信息的额外描述
+                case MediaPlayer.ALIVC_ERR_EXTRA_OPEN_FAILED://
+                    mTextViewPlayerError.setText(mTextViewPlayerError.getText().toString() + ",open stream 失败");
+                    break;
+                case MediaPlayer.ALIVC_ERR_EXTRA_PREPARE_FAILED://
+                    mTextViewPlayerError.setText(mTextViewPlayerError.getText().toString() + ",prepare失败");
+                    break;
+                case MediaPlayer.ALIVC_ERR_EXTRA_DEFAULT://
+                    mTextViewPlayerError.setText(mTextViewPlayerError.getText().toString() + ",缺省值");
+                    break;
+                default:
+                    mTextViewPlayerError.setText(mTextViewPlayerError.getText().toString() + ",NO");
+                    break;
             }
         }
     }
 
     /**
-     * 信息通知监听器:重点是缓存开始/结束
+     * 信息通知监听器:重点是缓存开始/结束  当视频开始播放，用户需要知道视频的相关信息，可以注册该事件。
      */
-    private class VideoInfolistener implements MediaPlayer.MediaPlayerInfoListener {
-
+    private class VideoInfoListener implements MediaPlayer.MediaPlayerInfoListener {
+        @Override
         public void onInfo(int what, int extra) {
-            Log.d(TAG, "onInfo what = " + what + " extra = " + extra);
-            System.out.println();
             switch (what) {
                 case MediaPlayer.MEDIA_INFO_UNKNOW:
+                    mTextViewInfoMessage.setText("未知");
                     break;
                 case MediaPlayer.MEDIA_INFO_BUFFERING_START:
-                    //pause();
-                    show_buffering_ui(true);
+                    mTextViewInfoMessage.setText("开始缓冲");
                     break;
                 case MediaPlayer.MEDIA_INFO_BUFFERING_END:
-                    //start();
-                    show_buffering_ui(false);
-                    break;
-                case MediaPlayer.MEDIA_INFO_TRACKING_LAGGING:
-                    break;
-                case MediaPlayer.MEDIA_INFO_NETWORK_ERROR:
-                    report_error("�������!", true);
+                    mTextViewInfoMessage.setText("结束缓冲");
                     break;
                 case MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START:
+                    mTextViewInfoMessage.setText("首帧显示时间");
                     if (mPlayer != null)
-                        Log.d(TAG, "on Info first render start : " + ((long) mPlayer.getPropertyDouble(AliVcMediaPlayer.FFP_PROP_DOUBLE_1st_VFRAME_SHOW_TIME, -1) - (long) mPlayer.getPropertyDouble(AliVcMediaPlayer.FFP_PROP_DOUBLE_OPEN_STREAM_TIME, -1)));
+                        Log.d(TAG, "首帧显示时间 : " + ((long) mPlayer.getPropertyDouble(AliVcMediaPlayer.FFP_PROP_DOUBLE_1st_VFRAME_SHOW_TIME, -1) - (long) mPlayer.getPropertyDouble(AliVcMediaPlayer.FFP_PROP_DOUBLE_OPEN_STREAM_TIME, -1)));
+                    break;
+                case MediaPlayer.MEDIA_INFO_TRACKING_LAGGING:
+                    mTextViewInfoMessage.setText("跟踪滞后");
+                    break;
+                case MediaPlayer.MEDIA_INFO_NETWORK_ERROR:
+                    mTextViewInfoMessage.setText("网络异常");
                     break;
             }
         }
     }
 
     /**
-     * 快进完成监听器
+     * 当视频进行seek跳转后，会发出该事件通知消息，用户注册该事件通知后，能收到跳转完成通知。 点播功能时用到
      */
-    private class VideoSeekCompletelistener implements MediaPlayer.MediaPlayerSeekCompleteListener {
-
+    private class VideoSeekCompleteListener implements MediaPlayer.MediaPlayerSeekCompleteListener {
+        @Override
         public void onSeekCompleted() {
-            mEnableUpdateProgress = true;
+
         }
     }
 
     /**
-     * 视频播完监听器
+     * 当视频播放完成后，会发出该事件通知消息，用户需要注册该事件，在播放完成后完成相关清理工作。  点播功能时用到
      */
-    private class VideoCompletelistener implements MediaPlayer.MediaPlayerCompletedListener {
-
+    private class VideoCompleteListener implements MediaPlayer.MediaPlayerCompletedListener {
+        @Override
         public void onCompleted() {
-            Log.d(TAG, "onCompleted.");
-
-            AlertDialog.Builder builder = new AlertDialog.Builder(PlayerActivity.this);
+            // 点播播放结束后弹出 退出 对话框
+            AlertDialog.Builder builder = new AlertDialog.Builder(ImportUrlPlayerActivity.this);
             builder.setMessage("播放结束");
-
             builder.setTitle("提示");
-
-
             builder.setNegativeButton("退出", new DialogInterface.OnClickListener() {
-
                 @Override
                 public void onClick(DialogInterface dialog, int which) {
                     dialog.dismiss();
-                    PlayerActivity.this.finish();
+                    ImportUrlPlayerActivity.this.finish();
                 }
             });
-
             builder.create().show();
         }
     }
 
     /**
-     * 视频大小变化监听器
+     * 当视频播放时视频大小(长宽)改变后，会发出该事件通知。
      */
-    private class VideoSizeChangelistener implements MediaPlayer.MediaPlayerVideoSizeChangeListener {
-
+    private class VideoSizeChangeListener implements MediaPlayer.MediaPlayerVideoSizeChangeListener {
+        @Override
         public void onVideoSizeChange(int width, int height) {
             Log.d(TAG, "onVideoSizeChange width = " + width + " height = " + height);
         }
     }
 
     /**
-     * 视频缓存变化监听器: percent 为 0~100之间的数字】
+     * 当网络下载速度较慢来不及播放时，会发送下载缓冲进度通知
      */
-    private class VideoBufferUpdatelistener implements MediaPlayer.MediaPlayerBufferingUpdateListener {
-
+    private class VideoBufferUpdateListener implements MediaPlayer.MediaPlayerBufferingUpdateListener {
+        // percent 为 0~100之间的数字
+        @Override
         public void onBufferingUpdateListener(int percent) {
-
+            System.out.println("缓存：" + percent);
         }
     }
+
+    // 标记播放器是否已经停止
+    private boolean isStopPlayer = false;
 
     /**
      * 视频停止监听器
@@ -366,5 +389,112 @@ public class ImportUrlPlayerActivity extends AppCompatActivity {
     }
 
     // -------------------------------------------------------------------------------------------------------------------------------------
+
+
+    // 这里是彻底停止播放器，在完全退出播放界面时可用
+    private void stop() {
+        Log.d(TAG, "AudioRender: stop play");
+        if (mPlayer != null) {
+            mPlayer.stop();
+            mPlayer.destroy();
+            mPlayer = null;
+        }
+    }
+
+    // 重点:判定是否在前台工作
+    public boolean isRunningForeground() {
+        ActivityManager activityManager = (ActivityManager) this.getSystemService(Context.ACTIVITY_SERVICE);
+        List<ActivityManager.RunningAppProcessInfo> appProcessInfos = activityManager.getRunningAppProcesses();
+        // 枚举进程
+        for (ActivityManager.RunningAppProcessInfo appProcessInfo : appProcessInfos) {
+            if (appProcessInfo.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND) {
+                if (appProcessInfo.processName.equals(this.getApplicationInfo().processName)) {
+                    Log.d(TAG, "EntryActivity isRunningForeGround");
+                    return true;
+                }
+            }
+        }
+        Log.d(TAG, "EntryActivity isRunningBackGround");
+        return false;
+    }
+
+    @Override
+    protected void onStart() {
+        Log.e(TAG, "onStart.");
+        super.onStart();
+        if (!isCurrentRunningForeground) {
+            Log.d(TAG, "是从后台工作切换倒前台工作");
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        Log.e(TAG, "onResume");
+        super.onResume();
+
+        // 重点:如果播放器是从锁屏/后台切换到前台,那么调用player.stat
+        if (mPlayer != null && !isStopPlayer && isPausePlayer) {
+            if (!isPausedByUser) {
+                isPausePlayer = false;
+                mPlayer.play();
+            }
+        }
+    }
+
+
+    @Override
+    protected void onPause() {
+        Log.e(TAG, "onPause." + isStopPlayer + " " + isPausePlayer + " " + (mPlayer == null));
+        super.onPause();
+        // 重点:播放器没有停止,也没有暂停的时候,在activity的pause的时候也需要pause
+        if (!isStopPlayer && !isPausePlayer && mPlayer != null) {
+            Log.e(TAG, "onPause mpayer.");
+            mPlayer.pause();
+            isPausePlayer = true;
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        Log.e(TAG, "onStop.");
+        super.onStop();
+        isCurrentRunningForeground = isRunningForeground();
+        if (!isCurrentRunningForeground) {
+            Log.d(TAG, "从前台工作变为后台工作");
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        Log.e(TAG, "AudioRender: onDestroy.");
+
+        releaseWakeLock();
+
+//        // 解除注册的网络状态变化监听广播
+//        if (connectionReceiver != null) {
+//            unregisterReceiver(connectionReceiver);
+//        }
+
+        // 重点:在 activity destroy的时候,要停止播放器并释放播放器
+        if (mPlayer != null) {
+            stop();
+        }
+
+        super.onDestroy();
+    }
+
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            isStopPlayer = true;
+        }
+        return super.onKeyDown(keyCode, event);
+    }
 
 }
